@@ -5,44 +5,47 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>PushUp Arena</title>
     <style>
-        body { font-family: system-ui, sans-serif; background: #0b0b0c; color: #fff; text-align: center; padding: 15px; margin: 0; user-select: none; }
-        .card { background: #161618; padding: 15px; border-radius: 14px; margin-bottom: 12px; border: 1px solid #242427; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-        .hp-bar { background: #242427; border-radius: 8px; height: 18px; width: 100%; margin: 10px 0; overflow: hidden; border: 1px solid #333; }
-        .hp-fill { background: linear-gradient(90deg, #ff3b30, #ff9500); height: 100%; width: 100%; transition: width 0.1s ease; }
-        button { background: linear-gradient(135deg, #ff9500, #ff3b30); color: #fff; border: none; padding: 14px 30px; font-size: 18px; border-radius: 30px; cursor: pointer; font-weight: bold; width: 100%; max-width: 280px; box-shadow: 0 4px 15px rgba(255, 149, 0, 0.4); margin-top: 10px; }
-        select { background: #242427; color: #fff; border: 1px solid #3a3a3c; padding: 12px; border-radius: 10px; font-size: 16px; width: 100%; max-width: 280px; margin-bottom: 10px; }
-        .video-box { position: relative; width: 100%; max-width: 240px; margin: 15px auto; border-radius: 50%; overflow: hidden; border: 3px solid #ff9500; display: none; aspect-ratio: 1; }
-        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        .dmg-popup { position: absolute; color: #ff3b30; font-size: 36px; font-weight: bold; animation: floatUp 0.4s ease-out forwards; pointer-events: none; display: none; left: 50%; top: 45%; transform: translate(-50%, -50%); text-shadow: 0 0 10px #000; }
-        @keyframes floatUp { 0% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -130%) scale(1.5); } }
+        body { font-family: sans-serif; background: #111; color: #fff; text-align: center; padding: 15px; }
+        .card { background: #222; padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #333; }
+        .hp-bar { background: #333; border-radius: 6px; height: 16px; width: 100%; margin: 10px 0; overflow: hidden; }
+        .hp-fill { background: #ff3b30; height: 100%; width: 100%; transition: width 0.1s ease; }
+        button { background: #ff9500; color: #fff; border: none; padding: 12px 24px; font-size: 16px; border-radius: 20px; cursor: pointer; font-weight: bold; margin-top: 10px; }
+        .btn-side { width: 45%; display: inline-block; margin: 5px; background: #555; }
+        .quiz-opt { background: #333; border: 1px solid #444; padding: 12px; border-radius: 8px; margin: 8px 0; cursor: pointer; }
+        .quiz-opt:active { background: #ff9500; }
     </style>
 </head>
 <body>
-    <div style="font-size: 14px; color: #34c759; font-weight: bold; margin-bottom: 8px;" id="ai-status">🟢 АРЕНА ГОТОВА К БОЮ!</div>
-    
-    <div class="card">
-        <h2 style="margin:0 0 5px 0; font-size: 20px;">🏅 РЕЙДЕР ЛВЛ: <span id="hero-lvl">1</span></h2>
-        <span style="color: #ff9500; font-weight: bold;">💰 Золото: <span id="hero-gold">0</span></span> — 
-        <span style="color: #34c759; font-weight: bold;">⚔️ Атаки: <span id="hero-pushups">0</span></span>
+    <!-- ЭКРАН ТЕСТА/ОПРОСНИКА -->
+    <div id="quiz-screen" class="card">
+        <h2 style="color: #ff9500;">⚙️ КАЛИБРОВКА ТРЕНИРОВКИ</h2>
+        <p id="quiz-question">Шаг 1: Сколько раз ты отжимаешься за один подход?</p>
+        <div id="quiz-options">
+            <div class="quiz-opt" onclick="setDiff(10, 10)">Меньше 10 раз (Новичок)</div>
+            <div class="quiz-opt" onclick="setDiff(25, 15)">От 10 до 25 раз (Ветеран)</div>
+            <div class="quiz-opt" onclick="setDiff(50, 25)">Больше 25 раз (Киборг)</div>
+        </div>
     </div>
 
-    <div class="card" style="position: relative;">
-        <label for="boss-select" style="font-size: 13px; color: #8e8e93; display:block; margin-bottom:6px;">ВЫБЕРИ БОССА АРЕНЫ:</label>
-        <select id="boss-select" onchange="changeBoss()">
-            <option value="40">🟢 Слайм-Лежебока (40 HP)</option>
-            <option value="120" selected>🟡 Дракон Дедлайнов (120 HP)</option>
-            <option value="400">🔴 Кибер-Орк Тренер (400 HP)</option>
-        </select>
-        <h2 id="boss-name" style="margin: 5px 0; font-size: 24px;">Дракон Дедлайнов</h2>
-        <div class="hp-bar"><div class="hp-fill" id="hp-fill"></div></div>
-        <small style="color: #ff3b30; font-weight: bold; font-size: 14px;"><span id="hp-text">120</span> / <span id="hp-max">120</span> HP</small>
-        <div class="dmg-popup" id="dmg-text">💥 -10 DMG</div>
-    </div>
-
-    <button id="start-btn" onclick="startArena()">⚔️ ВСТУПИТЬ В БОЙ</button>
-
-    <div class="video-box" id="video-box">
-        <video id="webcam" autoplay playsinline muted></video>
+    <!-- ОСНОВНОЙ ЭКРАН ИГРЫ -->
+    <div id="game-screen" style="display: none;">
+        <div id="difficulty-badge" style="color: #ff9500; font-weight: bold; margin-bottom: 10px;">⚡ РЕЖИМ АДАПТИРОВАН</div>
+        <div class="card">
+            <h3>🏅 УРОВЕНЬ: <span id="hero-lvl">1</span> | 💰 ЗОЛОТО: <span id="hero-gold">0</span></h3>
+            <span style="color: #34c759; font-weight: bold;">💪 Удары телом: <span id="hero-pushups">0</span></span>
+        </div>
+        <div class="card">
+            <h2 id="boss-name">Дракон Дедлайнов</h2>
+            <div class="hp-bar"><div class="hp-fill" id="hp-fill"></div></div>
+            <small><span id="hp-text">100</span> / <span id="hp-max">100</span> HP</small>
+        </div>
+        <div class="card">
+            <small style="color:#aaa; display:block; margin-bottom:5px;">ИЗМЕНИТЬ НАГРУЗКУ НА ЛЕТУ:</small>
+            <button class="btn-side" onclick="adjustDmg(-2)">🔽 ОБЛЕГЧИТЬ</button>
+            <button class="btn-side" onclick="adjustDmg(3)">🔼 УСЛОЖНИТЬ</button>
+        </div>
+        <button id="start-btn" onclick="startArena()">⚔️ ВСТУПИТЬ В БОЙ</button>
+        <div id="video-box" style="display:none; margin-top:15px;"><video id="webcam" autoplay playsinline muted style="width:100%; max-width:240px; border-radius:50%; transform:scaleX(-1); border:2px solid #ff9500;"></video></div>
     </div>
 
     <script>
@@ -50,18 +53,28 @@
         function playHitSound() {
             const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
             osc.type = 'sawtooth'; osc.frequency.setValueAtTime(170, audioCtx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(35, audioCtx.currentTime + 0.12);
-            gain.gain.setValueAtTime(0.4, audioCtx.currentTime); gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
-            osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.12);
+            osc.frequency.exponentialRampToValueAtTime(35, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime); gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.1);
         }
 
         let user = { level: 1, gold: 0, pushups: 0 };
-        let maxHp = 120; let currentHp = 120; let stage = 'up';
-        
-        // Переменные анализа яркости кадра
-        let canvas = document.createElement('canvas');
-        let ctx = canvas.getContext('2d');
-        let baselineBrightness = null;
+        let maxHp = 100; let currentHp = 100; let stage = 'up';
+        let dmgPerPushup = 10;
+        let canvas = document.createElement('canvas'); let ctx = canvas.getContext('2d'); let baselineBrightness = null;
+
+        function setDiff(hpFactor, dmgValue) {
+            maxHp = hpFactor * 5; currentHp = maxHp; dmgPerPushup = dmgValue;
+            document.getElementById('quiz-screen').style.display = 'none';
+            document.getElementById('game-screen').style.display = 'block';
+            document.getElementById('difficulty-badge').innerText = `⚡ ТВОЙ СИЛОВОЙ УРОН: ${dmgPerPushup} HP/ОТЖИМАНИЕ`;
+            updateHpUI(); loadUser();
+        }
+
+        function adjustDmg(val) {
+            dmgPerPushup = Math.max(2, dmgPerPushup + val);
+            document.getElementById('difficulty-badge').innerText = `⚡ МОДИФИЦИРОВАННЫЙ УРОН: ${dmgPerPushup} HP`;
+        }
 
         function loadUser() {
             const saved = localStorage.getItem('pushup_user');
@@ -72,65 +85,44 @@
                 document.getElementById('hero-pushups').innerText = user.pushups;
             }
         }
-        loadUser();
 
         async function startArena() {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 160, height: 160 }, audio: false });
-            const video = document.getElementById('webcam');
-            video.srcObject = stream;
+            document.getElementById('webcam').srcObject = stream;
             document.getElementById('start-btn').style.display = 'none';
             document.getElementById('video-box').style.display = 'block';
-            video.onloadedmetadata = () => { 
-                canvas.width = 40; canvas.height = 40; // Маленький размер для моментального обсчета яркости
-                setTimeout(() => { loop(); }, 1000); // 1 секунда на калибровку света в комнате
-            };
+            document.getElementById('webcam').onloadedmetadata = () => { canvas.width = 40; canvas.height = 40; setTimeout(() => { loop(); }, 1000); };
         }
 
         function loop() {
             const video = document.getElementById('webcam');
             if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                let data = imgData.data;
-                
-                // Считаем общую среднюю яркость текущего кадра
-                let totalBrightness = 0;
-                for (let i = 0; i < data.length; i += 4) {
-                    totalBrightness += (data[i] + data[i+1] + data[i+2]) / 3;
-                }
-                let avgBrightness = totalBrightness / (canvas.width * canvas.height);
-
-                if (baselineBrightness === null) {
-                    baselineBrightness = avgBrightness; // Запоминаем дефолтный свет в комнате
-                }
-
-                // Логика отжимания: если яркость упала на 35% (тело закрыло камеру)
-                let dropPercent = ((baselineBrightness - avgBrightness) / baselineBrightness) * 100;
-
-                if (dropPercent > 35 && stage === 'up') {
-                    stage = 'down'; // Опустился грудью к полу
-                }
-                if (dropPercent < 15 && stage === 'down') {
-                    stage = 'up'; // Поднялся обратно в упор
-                    triggerArenaStrike();
-                }
+                let data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                let total = 0;
+                for (let i = 0; i < data.length; i += 4) { total += (data[i] + data[i+1] + data[i+2]) / 3; }
+                let avg = total / (canvas.width * canvas.height);
+                if (baselineBrightness === null) baselineBrightness = avg;
+                let drop = ((baselineBrightness - avg) / baselineBrightness) * 100;
+                if (drop > 35 && stage === 'up') stage = 'down';
+                if (drop < 15 && stage === 'down') { stage = 'up'; triggerArenaStrike(); }
             }
             requestAnimationFrame(loop);
         }
 
         function triggerArenaStrike() {
-            playHitSound(); const dmg = document.getElementById('dmg-text'); dmg.style.display = 'block';
-            setTimeout(() => { dmg.style.display = 'none'; }, 400);
-            user.pushups++; currentHp = Math.max(0, currentHp - 10); user.gold += 5;
-            if (currentHp === 0) { user.level++; user.gold += 40; alert('💥 БОСС ПОВЕРЖЕН!'); currentHp = maxHp; }
+            playHitSound();
+            user.pushups++; currentHp = Math.max(0, currentHp - dmgPerPushup); user.gold += 5;
+            if (currentHp === 0) { user.level++; user.gold += 50; alert('🎉 БОСС ПОВЕРЖЕН!'); currentHp = maxHp; }
             document.getElementById('hero-pushups').innerText = user.pushups; document.getElementById('hero-gold').innerText = user.gold;
             document.getElementById('hero-lvl').innerText = user.level; updateHpUI();
             localStorage.setItem('pushup_user', JSON.stringify(user));
         }
 
-        function changeBoss() { const select = document.getElementById('boss-select'); maxHp = parseInt(select.value); currentHp = maxHp; updateHpUI(); }
-        function updateHpUI() { document.getElementById('hp-max').innerText = maxHp; document.getElementById('hp-text').innerText = currentHp; document.getElementById('hp-fill').style.width = (currentHp / maxHp) * 100 + '%'; }
+        function updateHpUI() {
+            document.getElementById('hp-max').innerText = maxHp; document.getElementById('hp-text').innerText = currentHp;
+            document.getElementById('hp-fill').style.width = (currentHp / maxHp) * 100 + '%';
+        }
     </script>
 </body>
 </html>
-

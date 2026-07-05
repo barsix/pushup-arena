@@ -4,9 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>PushUp Arena</title>
-    <script src="https://jsdelivr.net"></script>
-    <script src="https://jsdelivr.net"></script>
-    <script src="https://jsdelivr.net"></script>
     <style>
         body { font-family: system-ui, sans-serif; background: #0b0b0c; color: #fff; text-align: center; padding: 15px; margin: 0; user-select: none; }
         .card { background: #161618; padding: 15px; border-radius: 14px; margin-bottom: 12px; border: 1px solid #242427; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
@@ -14,20 +11,21 @@
         .hp-fill { background: linear-gradient(90deg, #ff3b30, #ff9500); height: 100%; width: 100%; transition: width 0.1s ease; }
         button { background: linear-gradient(135deg, #ff9500, #ff3b30); color: #fff; border: none; padding: 14px 30px; font-size: 18px; border-radius: 30px; cursor: pointer; font-weight: bold; width: 100%; max-width: 280px; box-shadow: 0 4px 15px rgba(255, 149, 0, 0.4); margin-top: 10px; }
         select { background: #242427; color: #fff; border: 1px solid #3a3a3c; padding: 12px; border-radius: 10px; font-size: 16px; width: 100%; max-width: 280px; margin-bottom: 10px; }
-        .video-box { position: relative; width: 100%; max-width: 320px; margin: 15px auto; border-radius: 12px; overflow: hidden; border: 3px solid #ff9500; display: none; }
-        video { width: 100%; display: block; transform: scaleX(-1); }
-        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .video-box { position: relative; width: 100%; max-width: 240px; margin: 15px auto; border-radius: 50%; overflow: hidden; border: 3px solid #ff9500; display: none; aspect-ratio: 1; }
+        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
         .dmg-popup { position: absolute; color: #ff3b30; font-size: 36px; font-weight: bold; animation: floatUp 0.4s ease-out forwards; pointer-events: none; display: none; left: 50%; top: 45%; transform: translate(-50%, -50%); text-shadow: 0 0 10px #000; }
         @keyframes floatUp { 0% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -130%) scale(1.5); } }
     </style>
 </head>
 <body>
-    <div style="font-size: 13px; color: #ff9500; font-weight: bold; margin-bottom: 8px;" id="ai-status">🔥 АРЕНА: Запуск ИИ...</div>
+    <div style="font-size: 14px; color: #34c759; font-weight: bold; margin-bottom: 8px;" id="ai-status">🟢 АРЕНА ГОТОВА К БОЮ!</div>
+    
     <div class="card">
         <h2 style="margin:0 0 5px 0; font-size: 20px;">🏅 РЕЙДЕР ЛВЛ: <span id="hero-lvl">1</span></h2>
         <span style="color: #ff9500; font-weight: bold;">💰 Золото: <span id="hero-gold">0</span></span> — 
         <span style="color: #34c759; font-weight: bold;">⚔️ Атаки: <span id="hero-pushups">0</span></span>
     </div>
+
     <div class="card" style="position: relative;">
         <label for="boss-select" style="font-size: 13px; color: #8e8e93; display:block; margin-bottom:6px;">ВЫБЕРИ БОССА АРЕНЫ:</label>
         <select id="boss-select" onchange="changeBoss()">
@@ -40,24 +38,31 @@
         <small style="color: #ff3b30; font-weight: bold; font-size: 14px;"><span id="hp-text">120</span> / <span id="hp-max">120</span> HP</small>
         <div class="dmg-popup" id="dmg-text">💥 -10 DMG</div>
     </div>
-    <button id="start-btn" onclick="startArena()">⚔️ НАЧАТЬ РЕЙД</button>
+
+    <button id="start-btn" onclick="startArena()">⚔️ ВСТУПИТЬ В БОЙ</button>
+
     <div class="video-box" id="video-box">
         <video id="webcam" autoplay playsinline muted></video>
-        <canvas id="canvas-overlay"></canvas>
     </div>
+
     <script>
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         function playHitSound() {
             const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
             osc.type = 'sawtooth'; osc.frequency.setValueAtTime(170, audioCtx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(35, audioCtx.currentTime + 0.12);
-            gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
-            gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
-            osc.connect(gain); gain.connect(audioCtx.destination);
-            osc.start(); osc.stop(audioCtx.currentTime + 0.12);
+            gain.gain.setValueAtTime(0.4, audioCtx.currentTime); gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+            osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.12);
         }
+
         let user = { level: 1, gold: 0, pushups: 0 };
-        let maxHp = 120; let currentHp = 120; let detector = null; let stage = 'up'; let lastDiff = null;
+        let maxHp = 120; let currentHp = 120; let stage = 'up';
+        
+        // Переменные анализа яркости кадра
+        let canvas = document.createElement('canvas');
+        let ctx = canvas.getContext('2d');
+        let baselineBrightness = null;
+
         function loadUser() {
             const saved = localStorage.getItem('pushup_user');
             if (saved) {
@@ -68,57 +73,51 @@
             }
         }
         loadUser();
-        async function initArenaAI() {
-            try {
-                await tf.setBackend('webgl');
-                detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
-                    modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
-                });
-                document.getElementById('ai-status').innerText = "⚔️ ИИ ГОТОВ! ПОСТАВЬ ТЕЛЕФОН ПЕРЕД СОБОЙ";
-                document.getElementById('ai-status').style.color = "#34c759";
-            } catch(e) { document.getElementById('ai-status').innerText = "Ошибка ИИ. Обнови страницу!"; }
-        }
-        initArenaAI();
+
         async function startArena() {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 }, audio: false });
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 160, height: 160 }, audio: false });
             const video = document.getElementById('webcam');
             video.srcObject = stream;
             document.getElementById('start-btn').style.display = 'none';
             document.getElementById('video-box').style.display = 'block';
             video.onloadedmetadata = () => { 
-                const canvas = document.getElementById('canvas-overlay');
-                canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-                loop(); 
+                canvas.width = 40; canvas.height = 40; // Маленький размер для моментального обсчета яркости
+                setTimeout(() => { loop(); }, 1000); // 1 секунда на калибровку света в комнате
             };
         }
-        async function loop() {
-            const video = document.getElementById('webcam'); const canvas = document.getElementById('canvas-overlay');
-            if (detector && video && canvas) {
-                const poses = await detector.estimatePoses(video); const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                if (poses && poses.length > 0) {
-                    const kp = poses.keypoints;
-                    const lShoulder = kp.find(p => p.name === 'left_shoulder'); const rShoulder = kp.find(p => p.name === 'right_shoulder');
-                    const lWrist = kp.find(p => p.name === 'left_wrist'); const rWrist = kp.find(p => p.name === 'right_wrist');
-                    kp.forEach(p => {
-                        if (p.score > 0.4 && ['left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist'].includes(p.name)) {
-                            ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, 2 * Math.PI); ctx.fillStyle = '#34c759'; ctx.fill();
-                        }
-                    });
-                    if (lShoulder?.score > 0.4 && rShoulder?.score > 0.4) {
-                        let avgShoulderY = (lShoulder.y + rShoulder.y) / 2;
-                        let avgWristY = (lWrist?.score > 0.3 && rWrist?.score > 0.3) ? (lWrist.y + rWrist.y) / 2 : canvas.height;
-                        let currentDiff = Math.abs(avgWristY - avgShoulderY);
-                        if (lastDiff !== null) {
-                            if (currentDiff < (lastDiff - 12) && stage === 'up') stage = 'down';
-                            if (currentDiff > (lastDiff + 12) && stage === 'down') { stage = 'up'; triggerArenaStrike(); }
-                        }
-                        lastDiff = currentDiff;
-                    }
+
+        function loop() {
+            const video = document.getElementById('webcam');
+            if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                let data = imgData.data;
+                
+                // Считаем общую среднюю яркость текущего кадра
+                let totalBrightness = 0;
+                for (let i = 0; i < data.length; i += 4) {
+                    totalBrightness += (data[i] + data[i+1] + data[i+2]) / 3;
+                }
+                let avgBrightness = totalBrightness / (canvas.width * canvas.height);
+
+                if (baselineBrightness === null) {
+                    baselineBrightness = avgBrightness; // Запоминаем дефолтный свет в комнате
+                }
+
+                // Логика отжимания: если яркость упала на 35% (тело закрыло камеру)
+                let dropPercent = ((baselineBrightness - avgBrightness) / baselineBrightness) * 100;
+
+                if (dropPercent > 35 && stage === 'up') {
+                    stage = 'down'; // Опустился грудью к полу
+                }
+                if (dropPercent < 15 && stage === 'down') {
+                    stage = 'up'; // Поднялся обратно в упор
+                    triggerArenaStrike();
                 }
             }
             requestAnimationFrame(loop);
         }
+
         function triggerArenaStrike() {
             playHitSound(); const dmg = document.getElementById('dmg-text'); dmg.style.display = 'block';
             setTimeout(() => { dmg.style.display = 'none'; }, 400);
@@ -128,8 +127,10 @@
             document.getElementById('hero-lvl').innerText = user.level; updateHpUI();
             localStorage.setItem('pushup_user', JSON.stringify(user));
         }
+
         function changeBoss() { const select = document.getElementById('boss-select'); maxHp = parseInt(select.value); currentHp = maxHp; updateHpUI(); }
         function updateHpUI() { document.getElementById('hp-max').innerText = maxHp; document.getElementById('hp-text').innerText = currentHp; document.getElementById('hp-fill').style.width = (currentHp / maxHp) * 100 + '%'; }
     </script>
 </body>
 </html>
+

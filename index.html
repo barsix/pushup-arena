@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>PushUp Arena RPG</title>
+    <!-- MediaPipe подключается, но не обязателен -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm/vision_wasm_internal.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs" type="module"></script>
     <style>
@@ -119,9 +120,9 @@
         </div>
         <button id="start-fight-btn" onclick="startFight()">⚔️ ВСТУПИТЬ В БОЙ</button>
         <button id="manual-rep-btn" style="display:none;" onclick="manualRep()">👊 +1 повторение (ручной ввод)</button>
+        <button id="enable-camera-btn" style="display:none;" onclick="enableCamera()">📷 Включить камеру</button>
         <div id="video-box" style="display:none; margin-top:10px; position:relative;">
             <video id="webcam" autoplay playsinline muted style="width:100%; max-width:240px; border-radius:12px; transform:scaleX(-1); border:2px solid #ff9500;"></video>
-            <canvas id="debug-canvas" style="display:none;"></canvas>
         </div>
         <button id="next-room-btn" style="display:none;" onclick="nextRoom()">▶️ Следующая комната</button>
     </div>
@@ -172,13 +173,13 @@
         let setRestTimer = null;
         let inRest = false;
 
-        // Камера и MediaPipe
+        // Камера и MediaPipe (опционально)
         let webcamStream = null;
         let poseLandmarker = null;
-        let lastVideoTime = -1;
         let stage = 'up';
         let repThreshold = 0.05;
         let baselineShoulderY = null;
+        let cameraEnabled = false; // включена ли камера с распознаванием
 
         // Данжи
         const dungeons = [
@@ -217,19 +218,26 @@
             }
         ];
 
-        // MediaPipe инициализация
+        // Инициализация MediaPipe (вызывается только при включении камеры)
         async function initPoseDetector() {
-            const vision = await FilesetResolver.forVisionTasks(
-                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
-            );
-            poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-                baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-                    delegate: 'GPU'
-                },
-                runningMode: 'VIDEO',
-                numPoses: 1
-            });
+            if (poseLandmarker) return true;
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+                );
+                poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+                        delegate: 'GPU'
+                    },
+                    runningMode: 'VIDEO',
+                    numPoses: 1
+                });
+                return true;
+            } catch (e) {
+                console.error('Не удалось загрузить модель распознавания позы:', e);
+                return false;
+            }
         }
 
         // Функции экранов
@@ -282,7 +290,9 @@
             roomHP = roomMaxHP;
             fightMode = currentRoom.type;
             fightActive = false;
+            cameraEnabled = false;
             clearAllTimers();
+            stopWebcam(); // на всякий случай
 
             document.getElementById('dungeon-title').innerText = currentDungeon.name;
             document.getElementById('room-info').innerText = `Комната ${currentRoomIndex + 1}/${currentDungeon.rooms.length}`;
@@ -296,9 +306,9 @@
             document.getElementById('timer-display').style.display = (fightMode === 'endurance') ? 'block' : 'none';
             document.getElementById('start-fight-btn').style.display = 'block';
             document.getElementById('manual-rep-btn').style.display = 'none';
+            document.getElementById('enable-camera-btn').style.display = 'none';
             document.getElementById('next-room-btn').style.display = 'none';
             document.getElementById('video-box').style.display = 'none';
-            stopWebcam();
 
             if (fightMode === 'sets') {
                 setCurrent = 1;
@@ -317,25 +327,21 @@
             document.getElementById('hp-fill').style.width = (roomHP / roomMaxHP * 100) + '%';
         }
 
-        // Бой
+        // Бой — теперь использует ручной ввод по умолчанию
         async function startFight() {
             if (fightActive) return;
             fightActive = true;
             document.getElementById('start-fight-btn').style.display = 'none';
             document.getElementById('manual-rep-btn').style.display = 'inline-block';
+            document.getElementById('enable-camera-btn').style.display = 'inline-block'; // кнопка для включения камеры
 
-            if (!poseLandmarker) {
-                try {
-                    await initPoseDetector();
-                } catch (e) {
-                    alert('Не удалось загрузить модель распознавания позы. Используй ручной ввод.');
-                    fightMode = 'normal';
-                }
+            // Если режим endurance или sets, запускаем таймер/подходы, но без камеры — только ручной ввод
+            if (fightMode === 'endurance') {
+                startEnduranceMode();
+            } else if (fightMode === 'sets') {
+                startSetsMode();
             }
-
-            if (fightMode === 'endurance') startEnduranceMode();
-            else if (fightMode === 'sets') startSetsMode();
-            else startWebcam();
+            // normal — просто ручной ввод
         }
 
         function onRepCompleted() {
@@ -358,113 +364,19 @@
             saveUser();
         }
 
-        function manualRep() { onRepCompleted(); }
-
-        function startEnduranceMode() {
-            enduranceReps = 0;
-            enduranceSecondsLeft = currentRoom.timeLimit;
-            document.getElementById('timer').innerText = formatTime(enduranceSecondsLeft);
-            document.getElementById('timer-display').style.display = 'block';
-            startWebcam();
-
-            enduranceTimer = setInterval(() => {
-                enduranceSecondsLeft--;
-                document.getElementById('timer').innerText = formatTime(enduranceSecondsLeft);
-                if (enduranceSecondsLeft <= 0) {
-                    clearInterval(enduranceTimer);
-                    enduranceTimer = null;
-                    finishEnduranceRound();
-                }
-            }, 1000);
+        function manualRep() {
+            onRepCompleted();
         }
 
-        function finishEnduranceRound() {
-            stopWebcam();
-            fightActive = false;
-            const totalDmg = enduranceReps * dmgPerPushup;
-            roomHP = Math.max(0, roomHP - totalDmg);
-            updateHPUI();
-            alert(`Время вышло! Сделано ${enduranceReps} повторений. Урон: ${totalDmg}.`);
-            if (roomHP <= 0) winRoom();
-            else {
-                alert('Моб ещё жив! Попробуй ещё раз.');
-                loadRoom();
-            }
-        }
-
-        function startSetsMode() {
-            setCurrent = 1;
-            setRepsDone = 0;
-            inRest = false;
-            updateSetUI();
-            document.getElementById('set-progress').style.display = 'block';
-            startWebcam();
-        }
-
-        function finishSet() {
-            stopWebcam();
-            fightActive = false;
-            if (setCurrent >= currentRoom.sets.count) {
-                roomHP = 0;
-                updateHPUI();
-                alert('Все подходы выполнены! Моб побеждён.');
-                winRoom();
+        // --- Включение камеры с распознаванием (опционально) ---
+        async function enableCamera() {
+            if (cameraEnabled) return;
+            const success = await initPoseDetector();
+            if (!success) {
+                alert('Не удалось загрузить модель. Продолжай с ручным вводом.');
                 return;
             }
-            inRest = true;
-            document.getElementById('manual-rep-btn').style.display = 'none';
-            const restSec = currentRoom.sets.rest;
-            alert(`Подход ${setCurrent} завершён! Отдых ${restSec} сек.`);
-            setRestTimer = setTimeout(() => {
-                inRest = false;
-                setCurrent++;
-                setRepsDone = 0;
-                updateSetUI();
-                document.getElementById('manual-rep-btn').style.display = 'inline-block';
-                startWebcam();
-                alert(`Подход ${setCurrent}. Начинай!`);
-            }, restSec * 1000);
-        }
-
-        function updateSetUI() {
-            document.getElementById('current-set').innerText = setCurrent;
-            document.getElementById('total-sets').innerText = currentRoom.sets.count;
-            document.getElementById('current-reps').innerText = setRepsDone;
-            document.getElementById('target-reps').innerText = currentRoom.sets.reps;
-        }
-
-        function winRoom() {
-            stopFight();
-            stopWebcam();
-            document.getElementById('manual-rep-btn').style.display = 'none';
-            user.gold += currentRoom.isBoss ? 100 : 30;
-            saveUser();
-
-            if (currentRoomIndex >= currentDungeon.rooms.length - 1) {
-                showScreen('victory-screen');
-                document.getElementById('victory-gold').innerText = user.gold;
-                user.level++;
-                saveUser();
-            } else {
-                document.getElementById('next-room-btn').style.display = 'block';
-                document.getElementById('start-fight-btn').style.display = 'none';
-            }
-        }
-
-        function nextRoom() {
-            currentRoomIndex++;
-            document.getElementById('next-room-btn').style.display = 'none';
-            loadRoom();
-        }
-
-        function backToDungeons() {
-            showScreen('dungeon-select');
-            renderDungeonList();
-        }
-
-        // Камера и распознавание
-        async function startWebcam() {
-            if (webcamStream) return;
+            // Включаем камеру и запускаем распознавание
             try {
                 webcamStream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: 'user', width: 640, height: 480 },
@@ -473,6 +385,8 @@
                 const video = document.getElementById('webcam');
                 video.srcObject = webcamStream;
                 document.getElementById('video-box').style.display = 'block';
+                document.getElementById('enable-camera-btn').style.display = 'none';
+                cameraEnabled = true;
 
                 baselineShoulderY = null;
                 stage = 'up';
@@ -481,7 +395,7 @@
                 };
             } catch (err) {
                 alert('Нет доступа к камере. Используй ручной ввод.');
-                document.getElementById('manual-rep-btn').style.display = 'inline-block';
+                cameraEnabled = false;
             }
         }
 
@@ -492,11 +406,13 @@
                 document.getElementById('webcam').srcObject = null;
                 document.getElementById('video-box').style.display = 'none';
             }
+            cameraEnabled = false;
         }
 
+        // Цикл распознавания (только если камера включена)
         async function detectPoseLoop() {
             const video = document.getElementById('webcam');
-            if (!fightActive || !webcamStream || !poseLandmarker) {
+            if (!fightActive || !cameraEnabled || !webcamStream || !poseLandmarker) {
                 requestAnimationFrame(detectPoseLoop);
                 return;
             }
@@ -529,10 +445,116 @@
             requestAnimationFrame(detectPoseLoop);
         }
 
+        // --- Режимы (endurance, sets) ---
+        function startEnduranceMode() {
+            enduranceReps = 0;
+            enduranceSecondsLeft = currentRoom.timeLimit;
+            document.getElementById('timer').innerText = formatTime(enduranceSecondsLeft);
+            document.getElementById('timer-display').style.display = 'block';
+
+            enduranceTimer = setInterval(() => {
+                enduranceSecondsLeft--;
+                document.getElementById('timer').innerText = formatTime(enduranceSecondsLeft);
+                if (enduranceSecondsLeft <= 0) {
+                    clearInterval(enduranceTimer);
+                    enduranceTimer = null;
+                    finishEnduranceRound();
+                }
+            }, 1000);
+        }
+
+        function finishEnduranceRound() {
+            stopWebcam();
+            fightActive = false;
+            document.getElementById('manual-rep-btn').style.display = 'none';
+            document.getElementById('enable-camera-btn').style.display = 'none';
+            const totalDmg = enduranceReps * dmgPerPushup;
+            roomHP = Math.max(0, roomHP - totalDmg);
+            updateHPUI();
+            alert(`Время вышло! Сделано ${enduranceReps} повторений. Урон: ${totalDmg}.`);
+            if (roomHP <= 0) winRoom();
+            else {
+                alert('Моб ещё жив! Попробуй ещё раз.');
+                loadRoom();
+            }
+        }
+
+        function startSetsMode() {
+            setCurrent = 1;
+            setRepsDone = 0;
+            inRest = false;
+            updateSetUI();
+            document.getElementById('set-progress').style.display = 'block';
+        }
+
+        function finishSet() {
+            stopWebcam();
+            fightActive = false;
+            document.getElementById('manual-rep-btn').style.display = 'none';
+            document.getElementById('enable-camera-btn').style.display = 'none';
+            if (setCurrent >= currentRoom.sets.count) {
+                roomHP = 0;
+                updateHPUI();
+                alert('Все подходы выполнены! Моб побеждён.');
+                winRoom();
+                return;
+            }
+            inRest = true;
+            const restSec = currentRoom.sets.rest;
+            alert(`Подход ${setCurrent} завершён! Отдых ${restSec} сек.`);
+            setRestTimer = setTimeout(() => {
+                inRest = false;
+                setCurrent++;
+                setRepsDone = 0;
+                updateSetUI();
+                document.getElementById('manual-rep-btn').style.display = 'inline-block';
+                document.getElementById('enable-camera-btn').style.display = 'inline-block';
+                alert(`Подход ${setCurrent}. Начинай!`);
+            }, restSec * 1000);
+        }
+
+        function updateSetUI() {
+            document.getElementById('current-set').innerText = setCurrent;
+            document.getElementById('total-sets').innerText = currentRoom.sets.count;
+            document.getElementById('current-reps').innerText = setRepsDone;
+            document.getElementById('target-reps').innerText = currentRoom.sets.reps;
+        }
+
+        function winRoom() {
+            stopFight();
+            stopWebcam();
+            document.getElementById('manual-rep-btn').style.display = 'none';
+            document.getElementById('enable-camera-btn').style.display = 'none';
+            user.gold += currentRoom.isBoss ? 100 : 30;
+            saveUser();
+
+            if (currentRoomIndex >= currentDungeon.rooms.length - 1) {
+                showScreen('victory-screen');
+                document.getElementById('victory-gold').innerText = user.gold;
+                user.level++;
+                saveUser();
+            } else {
+                document.getElementById('next-room-btn').style.display = 'block';
+                document.getElementById('start-fight-btn').style.display = 'none';
+            }
+        }
+
+        function nextRoom() {
+            currentRoomIndex++;
+            document.getElementById('next-room-btn').style.display = 'none';
+            loadRoom();
+        }
+
+        function backToDungeons() {
+            showScreen('dungeon-select');
+            renderDungeonList();
+        }
+
         function stopFight() {
             fightActive = false;
             clearAllTimers();
             document.getElementById('manual-rep-btn').style.display = 'none';
+            document.getElementById('enable-camera-btn').style.display = 'none';
         }
 
         function clearAllTimers() {
@@ -546,10 +568,11 @@
             return (m < 10 ? '0' + m : m) + ':' + (s < 10 ? '0' + s : s);
         }
 
-        // ★★★ Делаем функции глобальными для onclick ★★★
+        // Делаем функции глобальными
         window.setDifficulty = setDifficulty;
         window.startFight = startFight;
         window.manualRep = manualRep;
+        window.enableCamera = enableCamera;
         window.nextRoom = nextRoom;
         window.backToDungeons = backToDungeons;
 

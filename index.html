@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PushUp Arena RPG</title>
+    <title>PushUp Arena RPG - PoseNet</title>
+    <!-- Подключаем TensorFlow.js и PoseNet -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet@latest"></script>
     <style>
         body {
             font-family: sans-serif;
@@ -117,12 +120,8 @@
         </div>
         <button id="start-fight-btn" onclick="startFight()">⚔️ ВСТУПИТЬ В БОЙ</button>
         <button id="manual-rep-btn" style="display:none;" onclick="manualRep()">👊 +1 повторение (ручной ввод)</button>
-        <button id="enable-camera-btn" style="display:none;" onclick="enableCamera()">📷 Включить камеру (яркость)</button>
         <div id="video-box" style="display:none; margin-top:10px; position:relative;">
             <video id="webcam" autoplay playsinline muted style="width:100%; max-width:240px; border-radius:12px; transform:scaleX(-1); border:2px solid #ff9500;"></video>
-        </div>
-        <div id="motion-status" style="color:#aaa; margin-top:8px; display:none;">
-            📳 Датчик движения активен. Положи телефон на пол перед собой экраном вверх.
         </div>
         <button id="next-room-btn" style="display:none;" onclick="nextRoom()">▶️ Следующая комната</button>
     </div>
@@ -171,16 +170,12 @@
         let setRestTimer = null;
         let inRest = false;
 
-        // Камера (метод яркости)
+        // Камера и PoseNet
         let webcamStream = null;
-        let canvas, ctx, baselineBrightness, camStage = 'up';
-
-        // Акселерометр
-        let motionActive = false;
-        let accStage = 'up';
-        let accThreshold = 0.3; // порог ускорения для отжимания (по модулю Y)
-        let lastAccY = null;
-        let motionListener = null;
+        let net = null;
+        let poseStage = 'up';
+        let baselineShoulderY = null;
+        let repThreshold = 15; // пикселей (будет пересчитано)
 
         // Данжи
         const dungeons = [
@@ -218,6 +213,23 @@
                 ]
             }
         ];
+
+        // Инициализация PoseNet (загрузка модели)
+        async function initPoseNet() {
+            if (net) return true;
+            try {
+                net = await posenet.load({
+                    architecture: 'MobileNetV1',
+                    outputStride: 16,
+                    inputResolution: { width: 320, height: 240 },
+                    multiplier: 0.75
+                });
+                return true;
+            } catch (e) {
+                console.error('Ошибка загрузки PoseNet:', e);
+                return false;
+            }
+        }
 
         // Функции экранов
         function showScreen(id) {
@@ -271,7 +283,6 @@
             fightActive = false;
             clearAllTimers();
             stopWebcam();
-            stopMotion();
 
             document.getElementById('dungeon-title').innerText = currentDungeon.name;
             document.getElementById('room-info').innerText = `Комната ${currentRoomIndex + 1}/${currentDungeon.rooms.length}`;
@@ -285,10 +296,8 @@
             document.getElementById('timer-display').style.display = (fightMode === 'endurance') ? 'block' : 'none';
             document.getElementById('start-fight-btn').style.display = 'block';
             document.getElementById('manual-rep-btn').style.display = 'none';
-            document.getElementById('enable-camera-btn').style.display = 'none';
             document.getElementById('next-room-btn').style.display = 'none';
             document.getElementById('video-box').style.display = 'none';
-            document.getElementById('motion-status').style.display = 'none';
 
             if (fightMode === 'sets') {
                 setCurrent = 1;
@@ -307,20 +316,36 @@
             document.getElementById('hp-fill').style.width = (roomHP / roomMaxHP * 100) + '%';
         }
 
-        // Запуск боя – по умолчанию включает акселерометр
-        function startFight() {
+        // Запуск боя
+        async function startFight() {
             if (fightActive) return;
             fightActive = true;
             document.getElementById('start-fight-btn').style.display = 'none';
             document.getElementById('manual-rep-btn').style.display = 'inline-block';
-            document.getElementById('enable-camera-btn').style.display = 'inline-block';
 
-            // Пытаемся включить акселерометр
-            if (window.DeviceMotionEvent) {
-                startMotion();
-            } else {
-                document.getElementById('motion-status').style.display = 'block';
-                document.getElementById('motion-status').innerText = '⚠️ Датчик движения не поддерживается. Используйте ручной ввод или камеру.';
+            // Пытаемся загрузить PoseNet и включить камеру
+            const modelLoaded = await initPoseNet();
+            if (!modelLoaded) {
+                alert('Не удалось загрузить модель. Используй ручной ввод.');
+                return;
+            }
+            try {
+                webcamStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: 320, height: 240 },
+                    audio: false
+                });
+                const video = document.getElementById('webcam');
+                video.srcObject = webcamStream;
+                document.getElementById('video-box').style.display = 'block';
+
+                baselineShoulderY = null;
+                poseStage = 'up';
+                video.onloadedmetadata = () => {
+                    detectPoseLoop();
+                };
+            } catch (err) {
+                alert('Нет доступа к камере. Используй ручной ввод.');
+                document.getElementById('manual-rep-btn').style.display = 'inline-block';
             }
 
             if (fightMode === 'endurance') startEnduranceMode();
@@ -349,89 +374,38 @@
 
         function manualRep() { onRepCompleted(); }
 
-        // --- Акселерометр ---
-        function startMotion() {
-            if (motionActive) return;
-            // Запрашиваем разрешение (для iOS 13+)
-            if (typeof DeviceMotionEvent.requestPermission === 'function') {
-                DeviceMotionEvent.requestPermission()
-                    .then(permissionState => {
-                        if (permissionState === 'granted') {
-                            enableMotion();
-                        } else {
-                            document.getElementById('motion-status').style.display = 'block';
-                            document.getElementById('motion-status').innerText = '❌ Нет доступа к датчику движения.';
-                        }
-                    })
-                    .catch(console.error);
-            } else {
-                enableMotion();
+        // Цикл распознавания через PoseNet
+        async function detectPoseLoop() {
+            const video = document.getElementById('webcam');
+            if (!fightActive || !webcamStream || !net) {
+                requestAnimationFrame(detectPoseLoop);
+                return;
             }
-        }
 
-        function enableMotion() {
-            motionActive = true;
-            accStage = 'up';
-            lastAccY = null;
-            document.getElementById('motion-status').style.display = 'block';
-            document.getElementById('motion-status').innerText = '📳 Датчик движения активен. Положи телефон на пол перед собой экраном вверх и начинай отжиматься.';
-            motionListener = (event) => {
-                if (!fightActive || !motionActive) return;
-                const acc = event.accelerationIncludingGravity;
-                if (!acc) return;
-                // Используем ось Y (вертикальная). В покое ~9.8. При отжимании вниз значение растёт, вверх – падает.
-                const y = acc.y;
-                if (lastAccY === null) {
-                    lastAccY = y;
-                    return;
-                }
-                const delta = y - lastAccY;
-                // Отжимание вниз: тело опускается, ускорение вверх (y увеличивается). Порог можно откалибровать.
-                if (delta > accThreshold && accStage === 'up') {
-                    accStage = 'down';
-                } else if (delta < -accThreshold * 0.8 && accStage === 'down') {
-                    accStage = 'up';
-                    onRepCompleted();
-                }
-                lastAccY = y;
-            };
-            window.addEventListener('devicemotion', motionListener);
-        }
-
-        function stopMotion() {
-            if (motionListener) {
-                window.removeEventListener('devicemotion', motionListener);
-                motionListener = null;
-            }
-            motionActive = false;
-            document.getElementById('motion-status').style.display = 'none';
-        }
-
-        // --- Камера (яркость) ---
-        async function enableCamera() {
-            try {
-                webcamStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user', width: 160, height: 160 },
-                    audio: false
+            if (video.readyState >= 2) {
+                const pose = await net.estimateSinglePose(video, {
+                    flipHorizontal: false
                 });
-                const video = document.getElementById('webcam');
-                video.srcObject = webcamStream;
-                document.getElementById('video-box').style.display = 'block';
-                document.getElementById('enable-camera-btn').style.display = 'none';
-                if (!canvas) {
-                    canvas = document.createElement('canvas');
-                    ctx = canvas.getContext('2d');
+                const keypoints = pose.keypoints;
+                // Находим плечи (индексы 5 и 6)
+                const leftShoulder = keypoints.find(kp => kp.part === 'leftShoulder');
+                const rightShoulder = keypoints.find(kp => kp.part === 'rightShoulder');
+                if (leftShoulder && rightShoulder && leftShoulder.score > 0.5 && rightShoulder.score > 0.5) {
+                    const avgY = (leftShoulder.position.y + rightShoulder.position.y) / 2;
+                    if (baselineShoulderY === null) {
+                        baselineShoulderY = avgY;
+                        repThreshold = 0.04 * video.videoHeight; // порог 4% от высоты кадра
+                    }
+                    const drop = avgY - baselineShoulderY;
+                    if (drop > repThreshold && poseStage === 'up') {
+                        poseStage = 'down';
+                    } else if (drop < repThreshold * 0.3 && poseStage === 'down') {
+                        poseStage = 'up';
+                        onRepCompleted();
+                    }
                 }
-                canvas.width = 40;
-                canvas.height = 40;
-                baselineBrightness = null;
-                camStage = 'up';
-                video.onloadedmetadata = () => {
-                    loopCamera();
-                };
-            } catch (err) {
-                alert('Нет доступа к камере.');
             }
+            requestAnimationFrame(detectPoseLoop);
         }
 
         function stopWebcam() {
@@ -443,30 +417,7 @@
             }
         }
 
-        function loopCamera() {
-            const video = document.getElementById('webcam');
-            if (!fightActive || !webcamStream) {
-                requestAnimationFrame(loopCamera);
-                return;
-            }
-            if (video.readyState >= 2) {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-                let total = 0;
-                for (let i = 0; i < data.length; i += 4) total += (data[i] + data[i+1] + data[i+2]) / 3;
-                const avg = total / (canvas.width * canvas.height);
-                if (baselineBrightness === null) baselineBrightness = avg;
-                const drop = ((baselineBrightness - avg) / baselineBrightness) * 100;
-                if (drop > 35 && camStage === 'up') camStage = 'down';
-                if (drop < 15 && camStage === 'down') {
-                    camStage = 'up';
-                    onRepCompleted();
-                }
-            }
-            requestAnimationFrame(loopCamera);
-        }
-
-        // --- Режимы ---
+        // --- Режимы endurance / sets ---
         function startEnduranceMode() {
             enduranceReps = 0;
             enduranceSecondsLeft = currentRoom.timeLimit;
@@ -485,10 +436,8 @@
 
         function finishEnduranceRound() {
             stopWebcam();
-            stopMotion();
             fightActive = false;
             document.getElementById('manual-rep-btn').style.display = 'none';
-            document.getElementById('enable-camera-btn').style.display = 'none';
             const totalDmg = enduranceReps * dmgPerPushup;
             roomHP = Math.max(0, roomHP - totalDmg);
             updateHPUI();
@@ -510,10 +459,8 @@
 
         function finishSet() {
             stopWebcam();
-            stopMotion();
             fightActive = false;
             document.getElementById('manual-rep-btn').style.display = 'none';
-            document.getElementById('enable-camera-btn').style.display = 'none';
             if (setCurrent >= currentRoom.sets.count) {
                 roomHP = 0;
                 updateHPUI();
@@ -530,8 +477,7 @@
                 setRepsDone = 0;
                 updateSetUI();
                 document.getElementById('manual-rep-btn').style.display = 'inline-block';
-                document.getElementById('enable-camera-btn').style.display = 'inline-block';
-                startMotion(); // заново включаем датчик
+                startWebcam(); // перезапуск камеры для нового подхода
                 alert(`Подход ${setCurrent}. Начинай!`);
             }, restSec * 1000);
         }
@@ -546,9 +492,7 @@
         function winRoom() {
             stopFight();
             stopWebcam();
-            stopMotion();
             document.getElementById('manual-rep-btn').style.display = 'none';
-            document.getElementById('enable-camera-btn').style.display = 'none';
             user.gold += currentRoom.isBoss ? 100 : 30;
             saveUser();
 
@@ -577,10 +521,8 @@
         function stopFight() {
             fightActive = false;
             clearAllTimers();
-            stopMotion();
             stopWebcam();
             document.getElementById('manual-rep-btn').style.display = 'none';
-            document.getElementById('enable-camera-btn').style.display = 'none';
         }
 
         function clearAllTimers() {
@@ -607,10 +549,7 @@
             }
         };
 
-        window.addEventListener('beforeunload', () => {
-            stopWebcam();
-            stopMotion();
-        });
+        window.addEventListener('beforeunload', () => stopWebcam());
     </script>
 </body>
 </html>

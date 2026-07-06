@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>PushUp Arena RPG</title>
-    <!-- MediaPipe Pose Landmarker -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm/vision_wasm_internal.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs" type="module"></script>
     <style>
@@ -85,15 +84,6 @@
             display: block;
             margin: 5px auto;
         }
-        #debug-canvas {
-            display: none; /* Показывать скелет — раскомментируй для отладки */
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-        }
     </style>
 </head>
 <body>
@@ -131,7 +121,7 @@
         <button id="manual-rep-btn" style="display:none;" onclick="manualRep()">👊 +1 повторение (ручной ввод)</button>
         <div id="video-box" style="display:none; margin-top:10px; position:relative;">
             <video id="webcam" autoplay playsinline muted style="width:100%; max-width:240px; border-radius:12px; transform:scaleX(-1); border:2px solid #ff9500;"></video>
-            <canvas id="debug-canvas"></canvas>
+            <canvas id="debug-canvas" style="display:none;"></canvas>
         </div>
         <button id="next-room-btn" style="display:none;" onclick="nextRoom()">▶️ Следующая комната</button>
     </div>
@@ -144,10 +134,9 @@
     </div>
 
     <script type="module">
-        // ====================== ИМПОРТ MEDIAPIPE ======================
         import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs';
 
-        // ====================== ЗВУК ======================
+        // Звук
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         function playHitSound() {
             const osc = audioCtx.createOscillator();
@@ -163,7 +152,7 @@
             osc.stop(audioCtx.currentTime + 0.1);
         }
 
-        // ====================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ======================
+        // Глобальные переменные
         let user = { level: 1, gold: 0, totalPushups: 0 };
         let dmgPerPushup = 10;
 
@@ -183,15 +172,15 @@
         let setRestTimer = null;
         let inRest = false;
 
-        // Для камеры и MediaPipe
+        // Камера и MediaPipe
         let webcamStream = null;
         let poseLandmarker = null;
         let lastVideoTime = -1;
-        let stage = 'up';             // 'up' или 'down' для отжиманий
-        let repThreshold = 0.05;      // порог срабатывания (настроится автоматически)
+        let stage = 'up';
+        let repThreshold = 0.05;
         let baselineShoulderY = null;
 
-        // ====================== ДАНЖИ ======================
+        // Данжи
         const dungeons = [
             {
                 name: 'Тёмный подвал',
@@ -228,7 +217,7 @@
             }
         ];
 
-        // ====================== ИНИЦИАЛИЗАЦИЯ MEDIAPIPE ======================
+        // MediaPipe инициализация
         async function initPoseDetector() {
             const vision = await FilesetResolver.forVisionTasks(
                 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
@@ -243,7 +232,7 @@
             });
         }
 
-        // ====================== ФУНКЦИИ ЭКРАНОВ ======================
+        // Функции экранов
         function showScreen(id) {
             document.querySelectorAll('#quiz-screen, #dungeon-select, #dungeon-screen, #victory-screen').forEach(el => el.style.display = 'none');
             if (id) document.getElementById(id).style.display = 'block';
@@ -328,7 +317,7 @@
             document.getElementById('hp-fill').style.width = (roomHP / roomMaxHP * 100) + '%';
         }
 
-        // ====================== БОЙ ======================
+        // Бой
         async function startFight() {
             if (fightActive) return;
             fightActive = true;
@@ -340,7 +329,7 @@
                     await initPoseDetector();
                 } catch (e) {
                     alert('Не удалось загрузить модель распознавания позы. Используй ручной ввод.');
-                    fightMode = 'normal'; // fallback
+                    fightMode = 'normal';
                 }
             }
 
@@ -371,7 +360,6 @@
 
         function manualRep() { onRepCompleted(); }
 
-        // --- Выносливость ---
         function startEnduranceMode() {
             enduranceReps = 0;
             enduranceSecondsLeft = currentRoom.timeLimit;
@@ -404,7 +392,6 @@
             }
         }
 
-        // --- Подходы ---
         function startSetsMode() {
             setCurrent = 1;
             setRepsDone = 0;
@@ -475,7 +462,7 @@
             renderDungeonList();
         }
 
-        // ====================== КАМЕРА И РАСПОЗНАВАНИЕ ОТЖИМАНИЙ ======================
+        // Камера и распознавание
         async function startWebcam() {
             if (webcamStream) return;
             try {
@@ -486,12 +473,6 @@
                 const video = document.getElementById('webcam');
                 video.srcObject = webcamStream;
                 document.getElementById('video-box').style.display = 'block';
-
-                // Синхронизируем canvas отладки
-                const debugCanvas = document.getElementById('debug-canvas');
-                debugCanvas.width = video.videoWidth || 640;
-                debugCanvas.height = video.videoHeight || 480;
-                debugCanvas.style.display = 'none'; // включи, чтобы видеть скелет
 
                 baselineShoulderY = null;
                 stage = 'up';
@@ -515,9 +496,6 @@
 
         async function detectPoseLoop() {
             const video = document.getElementById('webcam');
-            const debugCanvas = document.getElementById('debug-canvas');
-            const debugCtx = debugCanvas.getContext('2d');
-
             if (!fightActive || !webcamStream || !poseLandmarker) {
                 requestAnimationFrame(detectPoseLoop);
                 return;
@@ -527,65 +505,30 @@
                 const startTimeMs = performance.now();
                 const results = await poseLandmarker.detectForVideo(video, startTimeMs);
 
-                // Отладка: рисуем скелет
-                if (debugCanvas.style.display !== 'none' && results.landmarks) {
-                    debugCtx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
-                    for (const landmarks of results.landmarks) {
-                        drawConnectors(debugCtx, landmarks, PoseLandmarker.POSE_CONNECTIONS);
-                        drawLandmarks(debugCtx, landmarks);
-                    }
-                }
-
                 if (results.landmarks && results.landmarks.length > 0) {
                     const landmarks = results.landmarks[0];
-                    // Используем плечи (индексы 11 и 12) как основной ориентир
                     const leftShoulder = landmarks[11];
                     const rightShoulder = landmarks[12];
                     const avgShoulderY = (leftShoulder.y + rightShoulder.y) / 2;
 
                     if (baselineShoulderY === null) {
                         baselineShoulderY = avgShoulderY;
-                        repThreshold = 0.03; // 3% от высоты кадра
+                        repThreshold = 0.03;
                     }
 
-                    const drop = avgShoulderY - baselineShoulderY; // положительное = опустился ниже
+                    const drop = avgShoulderY - baselineShoulderY;
 
-                    // Определяем фазу: down если плечи опустились больше порога
                     if (drop > repThreshold && stage === 'up') {
                         stage = 'down';
                     } else if (drop < repThreshold * 0.5 && stage === 'down') {
                         stage = 'up';
-                        onRepCompleted(); // засчитываем повторение
+                        onRepCompleted();
                     }
                 }
             }
-
             requestAnimationFrame(detectPoseLoop);
         }
 
-        // Вспомогательные функции рисования для MediaPipe (оставлены для отладки)
-        function drawConnectors(ctx, landmarks, connections) {
-            ctx.strokeStyle = '#00FF00';
-            ctx.lineWidth = 2;
-            for (const [i, j] of connections) {
-                const a = landmarks[i], b = landmarks[j];
-                ctx.beginPath();
-                ctx.moveTo(a.x * ctx.canvas.width, a.y * ctx.canvas.height);
-                ctx.lineTo(b.x * ctx.canvas.width, b.y * ctx.canvas.height);
-                ctx.stroke();
-            }
-        }
-
-        function drawLandmarks(ctx, landmarks) {
-            ctx.fillStyle = '#FF0000';
-            for (const lm of landmarks) {
-                ctx.beginPath();
-                ctx.arc(lm.x * ctx.canvas.width, lm.y * ctx.canvas.height, 3, 0, 2 * Math.PI);
-                ctx.fill();
-            }
-        }
-
-        // ====================== ВСПОМОГАТЕЛЬНЫЕ ======================
         function stopFight() {
             fightActive = false;
             clearAllTimers();
@@ -603,18 +546,23 @@
             return (m < 10 ? '0' + m : m) + ':' + (s < 10 ? '0' + s : s);
         }
 
-        // ====================== СТАРТ ======================
-        window.onload = () => {
-            const savedDiff = localStorage.getItem('pushup_diff');
-            if (savedDiff) {
-                dmgPerPushup = parseInt(savedDiff);
-                showScreen('dungeon-select');
-                renderDungeonList();
-                loadUser();
-            } else {
-                showScreen('quiz-screen');
-            }
-        };
+        // ★★★ Делаем функции глобальными для onclick ★★★
+        window.setDifficulty = setDifficulty;
+        window.startFight = startFight;
+        window.manualRep = manualRep;
+        window.nextRoom = nextRoom;
+        window.backToDungeons = backToDungeons;
+
+        // Старт
+        const savedDiff = localStorage.getItem('pushup_diff');
+        if (savedDiff) {
+            dmgPerPushup = parseInt(savedDiff);
+            showScreen('dungeon-select');
+            renderDungeonList();
+            loadUser();
+        } else {
+            showScreen('quiz-screen');
+        }
 
         window.addEventListener('beforeunload', () => stopWebcam());
     </script>

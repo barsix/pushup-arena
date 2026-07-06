@@ -3,126 +3,620 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PushUp Arena</title>
+    <title>PushUp Arena RPG</title>
+    <!-- MediaPipe Pose Landmarker -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm/vision_wasm_internal.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs" type="module"></script>
     <style>
-        body { font-family: sans-serif; background: #111; color: #fff; text-align: center; padding: 15px; }
-        .card { background: #222; padding: 15px; border-radius: 12px; margin-bottom: 10px; border: 1px solid #333; }
-        .hp-bar { background: #333; border-radius: 6px; height: 16px; width: 100%; margin: 10px 0; overflow: hidden; }
-        .hp-fill { background: #ff3b30; height: 100%; width: 100%; transition: width 0.1s ease; }
-        button { background: #ff9500; color: #fff; border: none; padding: 12px 24px; font-size: 16px; border-radius: 20px; cursor: pointer; font-weight: bold; margin-top: 10px; }
-        .btn-side { width: 45%; display: inline-block; margin: 5px; background: #555; }
-        .quiz-opt { background: #333; border: 1px solid #444; padding: 12px; border-radius: 8px; margin: 8px 0; cursor: pointer; }
+        body {
+            font-family: sans-serif;
+            background: #111;
+            color: #fff;
+            text-align: center;
+            padding: 10px;
+            margin: 0;
+        }
+        .card {
+            background: #222;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            border: 1px solid #333;
+        }
+        .hp-bar {
+            background: #333;
+            border-radius: 6px;
+            height: 16px;
+            width: 100%;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        .hp-fill {
+            background: #ff3b30;
+            height: 100%;
+            width: 100%;
+            transition: width 0.1s ease;
+        }
+        button {
+            background: #ff9500;
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 5px;
+        }
+        button:disabled { opacity: 0.5; }
+        .btn-side {
+            width: 45%;
+            display: inline-block;
+            margin: 5px;
+            background: #555;
+        }
+        .quiz-opt {
+            background: #333;
+            border: 1px solid #444;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 8px 0;
+            cursor: pointer;
+        }
         .quiz-opt:active { background: #ff9500; }
+        .dungeon-card {
+            background: #1a1a2e;
+            border: 1px solid #4a4a8a;
+            padding: 15px;
+            border-radius: 12px;
+            margin: 10px 0;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .dungeon-card:active { transform: scale(0.97); }
+        #timer {
+            font-size: 20px;
+            font-weight: bold;
+            color: #ffcc00;
+            margin: 5px;
+        }
+        .mob-icon {
+            font-size: 40px;
+            display: block;
+            margin: 5px auto;
+        }
+        #debug-canvas {
+            display: none; /* Показывать скелет — раскомментируй для отладки */
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
-    <!-- ЭКРАН ТЕСТА/ОПРОСНИКА -->
+    <!-- ЭКРАН КАЛИБРОВКИ -->
     <div id="quiz-screen" class="card">
-        <h2 style="color: #ff9500;">⚙️ КАЛИБРОВКА ТРЕНИРОВКИ</h2>
-        <p id="quiz-question">Шаг 1: Сколько раз ты отжимаешься за один подход?</p>
-        <div id="quiz-options">
-            <div class="quiz-opt" onclick="setDiff(10, 10)">Меньше 10 раз (Новичок)</div>
-            <div class="quiz-opt" onclick="setDiff(25, 15)">От 10 до 25 раз (Ветеран)</div>
-            <div class="quiz-opt" onclick="setDiff(50, 25)">Больше 25 раз (Киборг)</div>
-        </div>
+        <h2 style="color: #ff9500;">⚙️ КАЛИБРОВКА</h2>
+        <p>Сколько отжиманий ты делаешь за один подход?</p>
+        <div class="quiz-opt" onclick="setDifficulty(10)">Меньше 10 (Новичок)</div>
+        <div class="quiz-opt" onclick="setDifficulty(20)">10–25 (Ветеран)</div>
+        <div class="quiz-opt" onclick="setDifficulty(35)">Больше 25 (Киборг)</div>
     </div>
 
-    <!-- ОСНОВНОЙ ЭКРАН ИГРЫ -->
-    <div id="game-screen" style="display: none;">
-        <div id="difficulty-badge" style="color: #ff9500; font-weight: bold; margin-bottom: 10px;">⚡ РЕЖИМ АДАПТИРОВАН</div>
-        <div class="card">
-            <h3>🏅 УРОВЕНЬ: <span id="hero-lvl">1</span> | 💰 ЗОЛОТО: <span id="hero-gold">0</span></h3>
-            <span style="color: #34c759; font-weight: bold;">💪 Удары телом: <span id="hero-pushups">0</span></span>
-        </div>
-        <div class="card">
-            <h2 id="boss-name">Дракон Дедлайнов</h2>
+    <!-- ВЫБОР ДАНЖА -->
+    <div id="dungeon-select" style="display: none;">
+        <h2 style="color:#ff9500;">🗺️ ВЫБОР ДАНЖА</h2>
+        <div id="dungeon-list"></div>
+    </div>
+
+    <!-- ЭКРАН БОЯ -->
+    <div id="dungeon-screen" style="display: none;">
+        <div class="card" id="room-header" style="background:#1a1a2e;">
+            <h3 id="dungeon-title">Данж</h3>
+            <p id="room-info">Комната 1/4</p>
+            <span class="mob-icon" id="mob-icon">👾</span>
+            <h2 id="mob-name">Моб</h2>
             <div class="hp-bar"><div class="hp-fill" id="hp-fill"></div></div>
             <small><span id="hp-text">100</span> / <span id="hp-max">100</span> HP</small>
+            <div id="set-progress" style="display:none; margin-top:8px; color:#ffcc00;">
+                Подход <span id="current-set">1</span>/<span id="total-sets">3</span>
+                | Повторений: <span id="current-reps">0</span>/<span id="target-reps">10</span>
+            </div>
+            <div id="timer-display" style="display:none;">⏱️ <span id="timer">00:00</span></div>
         </div>
-        <div class="card">
-            <small style="color:#aaa; display:block; margin-bottom:5px;">ИЗМЕНИТЬ НАГРУЗКУ НА ЛЕТУ:</small>
-            <button class="btn-side" onclick="adjustDmg(-2)">🔽 ОБЛЕГЧИТЬ</button>
-            <button class="btn-side" onclick="adjustDmg(3)">🔼 УСЛОЖНИТЬ</button>
+        <button id="start-fight-btn" onclick="startFight()">⚔️ ВСТУПИТЬ В БОЙ</button>
+        <button id="manual-rep-btn" style="display:none;" onclick="manualRep()">👊 +1 повторение (ручной ввод)</button>
+        <div id="video-box" style="display:none; margin-top:10px; position:relative;">
+            <video id="webcam" autoplay playsinline muted style="width:100%; max-width:240px; border-radius:12px; transform:scaleX(-1); border:2px solid #ff9500;"></video>
+            <canvas id="debug-canvas"></canvas>
         </div>
-        <button id="start-btn" onclick="startArena()">⚔️ ВСТУПИТЬ В БОЙ</button>
-        <div id="video-box" style="display:none; margin-top:15px;"><video id="webcam" autoplay playsinline muted style="width:100%; max-width:240px; border-radius:50%; transform:scaleX(-1); border:2px solid #ff9500;"></video></div>
+        <button id="next-room-btn" style="display:none;" onclick="nextRoom()">▶️ Следующая комната</button>
     </div>
 
-    <script>
+    <!-- ПОБЕДА -->
+    <div id="victory-screen" style="display:none;" class="card">
+        <h2 style="color:gold;">🏆 ДАНЖ ПРОЙДЕН!</h2>
+        <p>Получено золота: <span id="victory-gold">0</span></p>
+        <button onclick="backToDungeons()">🗺️ К выбору данжа</button>
+    </div>
+
+    <script type="module">
+        // ====================== ИМПОРТ MEDIAPIPE ======================
+        import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs';
+
+        // ====================== ЗВУК ======================
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         function playHitSound() {
-            const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
-            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(170, audioCtx.currentTime);
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(170, audioCtx.currentTime);
             osc.frequency.exponentialRampToValueAtTime(35, audioCtx.currentTime + 0.1);
-            gain.gain.setValueAtTime(0.3, audioCtx.currentTime); gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
-            osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
         }
 
-        let user = { level: 1, gold: 0, pushups: 0 };
-        let maxHp = 100; let currentHp = 100; let stage = 'up';
+        // ====================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ======================
+        let user = { level: 1, gold: 0, totalPushups: 0 };
         let dmgPerPushup = 10;
-        let canvas = document.createElement('canvas'); let ctx = canvas.getContext('2d'); let baselineBrightness = null;
 
-        function setDiff(hpFactor, dmgValue) {
-            maxHp = hpFactor * 5; currentHp = maxHp; dmgPerPushup = dmgValue;
-            document.getElementById('quiz-screen').style.display = 'none';
-            document.getElementById('game-screen').style.display = 'block';
-            document.getElementById('difficulty-badge').innerText = `⚡ ТВОЙ СИЛОВОЙ УРОН: ${dmgPerPushup} HP/ОТЖИМАНИЕ`;
-            updateHpUI(); loadUser();
+        let currentDungeon = null;
+        let currentRoomIndex = 0;
+        let currentRoom = null;
+        let roomHP = 0;
+        let roomMaxHP = 0;
+
+        let fightMode = 'normal';
+        let fightActive = false;
+        let enduranceTimer = null;
+        let enduranceSecondsLeft = 0;
+        let enduranceReps = 0;
+        let setCurrent = 1;
+        let setRepsDone = 0;
+        let setRestTimer = null;
+        let inRest = false;
+
+        // Для камеры и MediaPipe
+        let webcamStream = null;
+        let poseLandmarker = null;
+        let lastVideoTime = -1;
+        let stage = 'up';             // 'up' или 'down' для отжиманий
+        let repThreshold = 0.05;      // порог срабатывания (настроится автоматически)
+        let baselineShoulderY = null;
+
+        // ====================== ДАНЖИ ======================
+        const dungeons = [
+            {
+                name: 'Тёмный подвал',
+                difficulty: 'Лёгкий',
+                bg: '#1a1a2e',
+                rooms: [
+                    { type: 'normal', mob: 'Крыса', icon: '🐀', hp: 40 },
+                    { type: 'endurance', mob: 'Паук', icon: '🕷️', hp: 50, timeLimit: 20 },
+                    { type: 'sets', mob: 'Слизень', icon: '🟢', hp: 60, sets: { reps: 8, count: 2, rest: 15 } },
+                    { type: 'normal', mob: 'Крысиный король', icon: '👑🐀', hp: 100, isBoss: true }
+                ]
+            },
+            {
+                name: 'Лес теней',
+                difficulty: 'Средний',
+                bg: '#1a2e1a',
+                rooms: [
+                    { type: 'normal', mob: 'Волк', icon: '🐺', hp: 60 },
+                    { type: 'endurance', mob: 'Энт', icon: '🌳', hp: 80, timeLimit: 30 },
+                    { type: 'sets', mob: 'Фея', icon: '🧚', hp: 70, sets: { reps: 10, count: 3, rest: 20 } },
+                    { type: 'normal', mob: 'Леший', icon: '👹🌿', hp: 150, isBoss: true }
+                ]
+            },
+            {
+                name: 'Огненные глубины',
+                difficulty: 'Сложный',
+                bg: '#2e1a1a',
+                rooms: [
+                    { type: 'sets', mob: 'Бес', icon: '😈', hp: 70, sets: { reps: 10, count: 2, rest: 10 } },
+                    { type: 'endurance', mob: 'Элементаль', icon: '🔥', hp: 90, timeLimit: 25 },
+                    { type: 'normal', mob: 'Демон', icon: '👿', hp: 80 },
+                    { type: 'normal', mob: 'Архидемон', icon: '👹🔥', hp: 200, isBoss: true }
+                ]
+            }
+        ];
+
+        // ====================== ИНИЦИАЛИЗАЦИЯ MEDIAPIPE ======================
+        async function initPoseDetector() {
+            const vision = await FilesetResolver.forVisionTasks(
+                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+            );
+            poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+                    delegate: 'GPU'
+                },
+                runningMode: 'VIDEO',
+                numPoses: 1
+            });
         }
 
-        function adjustDmg(val) {
-            dmgPerPushup = Math.max(2, dmgPerPushup + val);
-            document.getElementById('difficulty-badge').innerText = `⚡ МОДИФИЦИРОВАННЫЙ УРОН: ${dmgPerPushup} HP`;
+        // ====================== ФУНКЦИИ ЭКРАНОВ ======================
+        function showScreen(id) {
+            document.querySelectorAll('#quiz-screen, #dungeon-select, #dungeon-screen, #victory-screen').forEach(el => el.style.display = 'none');
+            if (id) document.getElementById(id).style.display = 'block';
+        }
+
+        function setDifficulty(dmg) {
+            dmgPerPushup = dmg;
+            localStorage.setItem('pushup_diff', dmg);
+            showScreen('dungeon-select');
+            renderDungeonList();
+            loadUser();
         }
 
         function loadUser() {
-            const saved = localStorage.getItem('pushup_user');
-            if (saved) {
-                user = JSON.parse(saved);
-                document.getElementById('hero-lvl').innerText = user.level;
-                document.getElementById('hero-gold').innerText = user.gold;
-                document.getElementById('hero-pushups').innerText = user.pushups;
+            const saved = localStorage.getItem('pushup_user_rpg');
+            if (saved) user = JSON.parse(saved);
+        }
+
+        function saveUser() {
+            localStorage.setItem('pushup_user_rpg', JSON.stringify(user));
+        }
+
+        function renderDungeonList() {
+            const list = document.getElementById('dungeon-list');
+            list.innerHTML = '';
+            dungeons.forEach((dung, idx) => {
+                const div = document.createElement('div');
+                div.className = 'dungeon-card';
+                div.style.background = dung.bg;
+                div.innerHTML = `<h3>${dung.name}</h3><small>Сложность: ${dung.difficulty}</small>`;
+                div.onclick = () => enterDungeon(idx);
+                list.appendChild(div);
+            });
+        }
+
+        function enterDungeon(index) {
+            currentDungeon = dungeons[index];
+            currentRoomIndex = 0;
+            stopFight();
+            showScreen('dungeon-screen');
+            loadRoom();
+        }
+
+        function loadRoom() {
+            currentRoom = currentDungeon.rooms[currentRoomIndex];
+            roomMaxHP = currentRoom.hp;
+            roomHP = roomMaxHP;
+            fightMode = currentRoom.type;
+            fightActive = false;
+            clearAllTimers();
+
+            document.getElementById('dungeon-title').innerText = currentDungeon.name;
+            document.getElementById('room-info').innerText = `Комната ${currentRoomIndex + 1}/${currentDungeon.rooms.length}`;
+            document.getElementById('mob-icon').innerText = currentRoom.icon || '👾';
+            document.getElementById('mob-name').innerText = currentRoom.mob;
+            if (currentRoom.isBoss) document.getElementById('mob-name').innerText += ' 💀 БОСС';
+
+            updateHPUI();
+
+            document.getElementById('set-progress').style.display = (fightMode === 'sets') ? 'block' : 'none';
+            document.getElementById('timer-display').style.display = (fightMode === 'endurance') ? 'block' : 'none';
+            document.getElementById('start-fight-btn').style.display = 'block';
+            document.getElementById('manual-rep-btn').style.display = 'none';
+            document.getElementById('next-room-btn').style.display = 'none';
+            document.getElementById('video-box').style.display = 'none';
+            stopWebcam();
+
+            if (fightMode === 'sets') {
+                setCurrent = 1;
+                setRepsDone = 0;
+                updateSetUI();
+            }
+            if (fightMode === 'endurance') {
+                enduranceReps = 0;
+                document.getElementById('timer').innerText = formatTime(currentRoom.timeLimit);
             }
         }
 
-        async function startArena() {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 160, height: 160 }, audio: false });
-            document.getElementById('webcam').srcObject = stream;
-            document.getElementById('start-btn').style.display = 'none';
-            document.getElementById('video-box').style.display = 'block';
-            document.getElementById('webcam').onloadedmetadata = () => { canvas.width = 40; canvas.height = 40; setTimeout(() => { loop(); }, 1000); };
+        function updateHPUI() {
+            document.getElementById('hp-max').innerText = roomMaxHP;
+            document.getElementById('hp-text').innerText = roomHP;
+            document.getElementById('hp-fill').style.width = (roomHP / roomMaxHP * 100) + '%';
         }
 
-        function loop() {
-            const video = document.getElementById('webcam');
-            if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                let data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-                let total = 0;
-                for (let i = 0; i < data.length; i += 4) { total += (data[i] + data[i+1] + data[i+2]) / 3; }
-                let avg = total / (canvas.width * canvas.height);
-                if (baselineBrightness === null) baselineBrightness = avg;
-                let drop = ((baselineBrightness - avg) / baselineBrightness) * 100;
-                if (drop > 35 && stage === 'up') stage = 'down';
-                if (drop < 15 && stage === 'down') { stage = 'up'; triggerArenaStrike(); }
+        // ====================== БОЙ ======================
+        async function startFight() {
+            if (fightActive) return;
+            fightActive = true;
+            document.getElementById('start-fight-btn').style.display = 'none';
+            document.getElementById('manual-rep-btn').style.display = 'inline-block';
+
+            if (!poseLandmarker) {
+                try {
+                    await initPoseDetector();
+                } catch (e) {
+                    alert('Не удалось загрузить модель распознавания позы. Используй ручной ввод.');
+                    fightMode = 'normal'; // fallback
+                }
             }
-            requestAnimationFrame(loop);
+
+            if (fightMode === 'endurance') startEnduranceMode();
+            else if (fightMode === 'sets') startSetsMode();
+            else startWebcam();
         }
 
-        function triggerArenaStrike() {
+        function onRepCompleted() {
+            if (!fightActive) return;
             playHitSound();
-            user.pushups++; currentHp = Math.max(0, currentHp - dmgPerPushup); user.gold += 5;
-            if (currentHp === 0) { user.level++; user.gold += 50; alert('🎉 БОСС ПОВЕРЖЕН!'); currentHp = maxHp; }
-            document.getElementById('hero-pushups').innerText = user.pushups; document.getElementById('hero-gold').innerText = user.gold;
-            document.getElementById('hero-lvl').innerText = user.level; updateHpUI();
-            localStorage.setItem('pushup_user', JSON.stringify(user));
+            user.totalPushups++;
+
+            if (fightMode === 'normal') {
+                roomHP = Math.max(0, roomHP - dmgPerPushup);
+                updateHPUI();
+                if (roomHP <= 0) winRoom();
+            } else if (fightMode === 'endurance') {
+                enduranceReps++;
+            } else if (fightMode === 'sets') {
+                if (inRest) return;
+                setRepsDone++;
+                updateSetUI();
+                if (setRepsDone >= currentRoom.sets.reps) finishSet();
+            }
+            saveUser();
         }
 
-        function updateHpUI() {
-            document.getElementById('hp-max').innerText = maxHp; document.getElementById('hp-text').innerText = currentHp;
-            document.getElementById('hp-fill').style.width = (currentHp / maxHp) * 100 + '%';
+        function manualRep() { onRepCompleted(); }
+
+        // --- Выносливость ---
+        function startEnduranceMode() {
+            enduranceReps = 0;
+            enduranceSecondsLeft = currentRoom.timeLimit;
+            document.getElementById('timer').innerText = formatTime(enduranceSecondsLeft);
+            document.getElementById('timer-display').style.display = 'block';
+            startWebcam();
+
+            enduranceTimer = setInterval(() => {
+                enduranceSecondsLeft--;
+                document.getElementById('timer').innerText = formatTime(enduranceSecondsLeft);
+                if (enduranceSecondsLeft <= 0) {
+                    clearInterval(enduranceTimer);
+                    enduranceTimer = null;
+                    finishEnduranceRound();
+                }
+            }, 1000);
         }
+
+        function finishEnduranceRound() {
+            stopWebcam();
+            fightActive = false;
+            const totalDmg = enduranceReps * dmgPerPushup;
+            roomHP = Math.max(0, roomHP - totalDmg);
+            updateHPUI();
+            alert(`Время вышло! Сделано ${enduranceReps} повторений. Урон: ${totalDmg}.`);
+            if (roomHP <= 0) winRoom();
+            else {
+                alert('Моб ещё жив! Попробуй ещё раз.');
+                loadRoom();
+            }
+        }
+
+        // --- Подходы ---
+        function startSetsMode() {
+            setCurrent = 1;
+            setRepsDone = 0;
+            inRest = false;
+            updateSetUI();
+            document.getElementById('set-progress').style.display = 'block';
+            startWebcam();
+        }
+
+        function finishSet() {
+            stopWebcam();
+            fightActive = false;
+            if (setCurrent >= currentRoom.sets.count) {
+                roomHP = 0;
+                updateHPUI();
+                alert('Все подходы выполнены! Моб побеждён.');
+                winRoom();
+                return;
+            }
+            inRest = true;
+            document.getElementById('manual-rep-btn').style.display = 'none';
+            const restSec = currentRoom.sets.rest;
+            alert(`Подход ${setCurrent} завершён! Отдых ${restSec} сек.`);
+            setRestTimer = setTimeout(() => {
+                inRest = false;
+                setCurrent++;
+                setRepsDone = 0;
+                updateSetUI();
+                document.getElementById('manual-rep-btn').style.display = 'inline-block';
+                startWebcam();
+                alert(`Подход ${setCurrent}. Начинай!`);
+            }, restSec * 1000);
+        }
+
+        function updateSetUI() {
+            document.getElementById('current-set').innerText = setCurrent;
+            document.getElementById('total-sets').innerText = currentRoom.sets.count;
+            document.getElementById('current-reps').innerText = setRepsDone;
+            document.getElementById('target-reps').innerText = currentRoom.sets.reps;
+        }
+
+        function winRoom() {
+            stopFight();
+            stopWebcam();
+            document.getElementById('manual-rep-btn').style.display = 'none';
+            user.gold += currentRoom.isBoss ? 100 : 30;
+            saveUser();
+
+            if (currentRoomIndex >= currentDungeon.rooms.length - 1) {
+                showScreen('victory-screen');
+                document.getElementById('victory-gold').innerText = user.gold;
+                user.level++;
+                saveUser();
+            } else {
+                document.getElementById('next-room-btn').style.display = 'block';
+                document.getElementById('start-fight-btn').style.display = 'none';
+            }
+        }
+
+        function nextRoom() {
+            currentRoomIndex++;
+            document.getElementById('next-room-btn').style.display = 'none';
+            loadRoom();
+        }
+
+        function backToDungeons() {
+            showScreen('dungeon-select');
+            renderDungeonList();
+        }
+
+        // ====================== КАМЕРА И РАСПОЗНАВАНИЕ ОТЖИМАНИЙ ======================
+        async function startWebcam() {
+            if (webcamStream) return;
+            try {
+                webcamStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: 640, height: 480 },
+                    audio: false
+                });
+                const video = document.getElementById('webcam');
+                video.srcObject = webcamStream;
+                document.getElementById('video-box').style.display = 'block';
+
+                // Синхронизируем canvas отладки
+                const debugCanvas = document.getElementById('debug-canvas');
+                debugCanvas.width = video.videoWidth || 640;
+                debugCanvas.height = video.videoHeight || 480;
+                debugCanvas.style.display = 'none'; // включи, чтобы видеть скелет
+
+                baselineShoulderY = null;
+                stage = 'up';
+                video.onloadedmetadata = () => {
+                    detectPoseLoop();
+                };
+            } catch (err) {
+                alert('Нет доступа к камере. Используй ручной ввод.');
+                document.getElementById('manual-rep-btn').style.display = 'inline-block';
+            }
+        }
+
+        function stopWebcam() {
+            if (webcamStream) {
+                webcamStream.getTracks().forEach(track => track.stop());
+                webcamStream = null;
+                document.getElementById('webcam').srcObject = null;
+                document.getElementById('video-box').style.display = 'none';
+            }
+        }
+
+        async function detectPoseLoop() {
+            const video = document.getElementById('webcam');
+            const debugCanvas = document.getElementById('debug-canvas');
+            const debugCtx = debugCanvas.getContext('2d');
+
+            if (!fightActive || !webcamStream || !poseLandmarker) {
+                requestAnimationFrame(detectPoseLoop);
+                return;
+            }
+
+            if (video.readyState >= 2) {
+                const startTimeMs = performance.now();
+                const results = await poseLandmarker.detectForVideo(video, startTimeMs);
+
+                // Отладка: рисуем скелет
+                if (debugCanvas.style.display !== 'none' && results.landmarks) {
+                    debugCtx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
+                    for (const landmarks of results.landmarks) {
+                        drawConnectors(debugCtx, landmarks, PoseLandmarker.POSE_CONNECTIONS);
+                        drawLandmarks(debugCtx, landmarks);
+                    }
+                }
+
+                if (results.landmarks && results.landmarks.length > 0) {
+                    const landmarks = results.landmarks[0];
+                    // Используем плечи (индексы 11 и 12) как основной ориентир
+                    const leftShoulder = landmarks[11];
+                    const rightShoulder = landmarks[12];
+                    const avgShoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+
+                    if (baselineShoulderY === null) {
+                        baselineShoulderY = avgShoulderY;
+                        repThreshold = 0.03; // 3% от высоты кадра
+                    }
+
+                    const drop = avgShoulderY - baselineShoulderY; // положительное = опустился ниже
+
+                    // Определяем фазу: down если плечи опустились больше порога
+                    if (drop > repThreshold && stage === 'up') {
+                        stage = 'down';
+                    } else if (drop < repThreshold * 0.5 && stage === 'down') {
+                        stage = 'up';
+                        onRepCompleted(); // засчитываем повторение
+                    }
+                }
+            }
+
+            requestAnimationFrame(detectPoseLoop);
+        }
+
+        // Вспомогательные функции рисования для MediaPipe (оставлены для отладки)
+        function drawConnectors(ctx, landmarks, connections) {
+            ctx.strokeStyle = '#00FF00';
+            ctx.lineWidth = 2;
+            for (const [i, j] of connections) {
+                const a = landmarks[i], b = landmarks[j];
+                ctx.beginPath();
+                ctx.moveTo(a.x * ctx.canvas.width, a.y * ctx.canvas.height);
+                ctx.lineTo(b.x * ctx.canvas.width, b.y * ctx.canvas.height);
+                ctx.stroke();
+            }
+        }
+
+        function drawLandmarks(ctx, landmarks) {
+            ctx.fillStyle = '#FF0000';
+            for (const lm of landmarks) {
+                ctx.beginPath();
+                ctx.arc(lm.x * ctx.canvas.width, lm.y * ctx.canvas.height, 3, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+        }
+
+        // ====================== ВСПОМОГАТЕЛЬНЫЕ ======================
+        function stopFight() {
+            fightActive = false;
+            clearAllTimers();
+            document.getElementById('manual-rep-btn').style.display = 'none';
+        }
+
+        function clearAllTimers() {
+            if (enduranceTimer) { clearInterval(enduranceTimer); enduranceTimer = null; }
+            if (setRestTimer) { clearTimeout(setRestTimer); setRestTimer = null; }
+        }
+
+        function formatTime(seconds) {
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            return (m < 10 ? '0' + m : m) + ':' + (s < 10 ? '0' + s : s);
+        }
+
+        // ====================== СТАРТ ======================
+        window.onload = () => {
+            const savedDiff = localStorage.getItem('pushup_diff');
+            if (savedDiff) {
+                dmgPerPushup = parseInt(savedDiff);
+                showScreen('dungeon-select');
+                renderDungeonList();
+                loadUser();
+            } else {
+                showScreen('quiz-screen');
+            }
+        };
+
+        window.addEventListener('beforeunload', () => stopWebcam());
     </script>
 </body>
 </html>
